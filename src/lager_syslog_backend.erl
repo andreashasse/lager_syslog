@@ -23,28 +23,19 @@
 -export([init/1, handle_call/2, handle_event/2, handle_info/2, terminate/2,
         code_change/3]).
 
--record(state, {level}).
+-record(state, {server, ident, facility, level}).
 
 -include_lib("lager/include/lager.hrl").
 
 %% @private
-init([Ident, Facility, Level]) ->
-    case application:start(syslog) of
-        ok ->
-            init2(Ident, Facility, Level);
-        {error, {already_started, _}} ->
-            init2(Ident, Facility, Level);
-        Error ->
-            Error
-    end.
+init(Config) ->
+    ok = ensure_running_syslog(Config),
+    Level = proplists:get_value(level, Config, info),
+    {ok, #state{server   = proplists:get_value(name, Config, syslog),
+                ident    = proplists:get_value(ident, Config, node()),
+                facility = proplists:get_value(facility, Config, local0),
+                level    = lager_util:level_to_num(Level)}}.
 
-init2(Ident, Facility, Level) ->
-    case syslog:open(Ident, [pid], Facility) of
-        ok ->
-            {ok, #state{level=lager_util:level_to_num(Level)}};
-        Error ->
-            Error
-    end.
 
 %% @private
 handle_call(get_loglevel, #state{level=Level} = State) ->
@@ -55,8 +46,12 @@ handle_call(_Request, State) ->
     {ok, ok, State}.
 
 %% @private
-handle_event({log, Level, {_Date, _Time}, [_LevelStr, Location, Message]}, State) ->
-    syslog:log(convert_level(Level), [Location, Message]),
+handle_event({log, Level, {_Date, _Time}, [_LevelStr, _Location, Message]}, State) ->
+    %% @todo maybe include Location info in logged message?
+    syslog:send(State#state.server, Message,
+                [{ident, State#state.ident},
+                 {facility, State#state.facility},
+                 {level, convert_level(Level)}]),
     {ok, State};
 handle_event(_Event, State) ->
     {ok, State}.
@@ -67,12 +62,26 @@ handle_info(_Info, State) ->
 
 %% @private
 terminate(_Reason, _State) ->
-    application:stop(syslog),
     ok.
 
 %% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+
+ensure_running_syslog(Config) ->
+    Name = proplists:get_value(name, Config, syslog),
+    case whereis(Name) of
+        undefined ->
+            {ok, _Pid} =
+                syslog:start_link(
+                    Name,
+                    proplists:get_value(ip, Config),
+                    proplists:get_value(port, Config)),
+            ok;
+        Pid when is_pid(Pid) ->
+            ok
+    end.
 
 convert_level(?DEBUG) -> debug;
 convert_level(?INFO) -> info;
@@ -82,4 +91,3 @@ convert_level(?ERROR) -> err;
 convert_level(?CRITICAL) -> crit;
 convert_level(?ALERT) -> alert;
 convert_level(?EMERGENCY) -> emergency.
-
