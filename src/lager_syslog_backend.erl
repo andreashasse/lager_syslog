@@ -23,15 +23,17 @@
 -export([init/1, handle_call/2, handle_event/2, handle_info/2, terminate/2,
         code_change/3]).
 
--record(state, {server, ident, facility, level}).
+-record(state, {server, host, ident, facility, level}).
 
 -include_lib("lager/include/lager.hrl").
 
 %% @private
 init(Config) ->
     ok = ensure_running_syslog(Config),
+    {ok, Host} = inet:gethostname(),
     Level = proplists:get_value(level, Config, info),
     {ok, #state{server   = proplists:get_value(name, Config, syslog),
+                host     = proplists:get_value(host, Config, Host),
                 ident    = proplists:get_value(ident, Config, node()),
                 facility = proplists:get_value(facility, Config, local0),
                 level    = lager_util:level_to_num(Level)}}.
@@ -49,7 +51,8 @@ handle_call(_Request, State) ->
 handle_event({log, Level, {_Date, _Time}, [_LevelStr, _Location, Message]}, State) ->
     %% @todo maybe include Location info in logged message?
     syslog:send(State#state.server, Message,
-                [{ident, State#state.ident},
+                [{host, State#state.host},
+                 {ident, State#state.ident},
                  {facility, State#state.facility},
                  {level, convert_level(Level)}]),
     {ok, State};
