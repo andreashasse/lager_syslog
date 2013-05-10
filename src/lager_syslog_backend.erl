@@ -48,9 +48,8 @@ handle_call(_Request, State) ->
     {ok, ok, State}.
 
 %% @private
-handle_event({log, Level, {_Date, _Time}, [_LevelStr, _Location, Message]}, State) ->
-    %% @todo maybe include Location info in logged message?
-    syslog:send(State#state.server, Message,
+handle_event({log, Level, {_Date, _Time}, [_LevelStr, Location, Message]}, State) ->
+    syslog:send(State#state.server, [Location, Message],
                 [{host, State#state.host},
                  {ident, State#state.ident},
                  {facility, State#state.facility},
