@@ -23,54 +23,20 @@
 -export([init/1, handle_call/2, handle_event/2, handle_info/2, terminate/2,
         code_change/3]).
 
--export([config_to_id/1]).
-
--record(state, {level, handle, id, formatter,format_config}).
+-record(state, {ident, facility, host, server, level,
+                handle, id}).
 
 -include_lib("lager/include/lager.hrl").
 
--define(DEFAULT_FORMAT,["[", severity, "] ",
-        {pid, ""},
-        {module, [
-                {pid, ["@"], ""},
-                module,
-                {function, [":", function], ""},
-                {line, [":",line], ""}], ""},
-        " ", message]).
-
-
-%% @private
-init([Ident, Facility, Level]) ->
-    init([Ident, Facility, Level, {lager_default_formatter, ?DEFAULT_FORMAT}]);
-init([Ident, Facility, Level, {Formatter, FormatterConfig}]) when is_atom(Formatter) ->
-    case application:start(syslog) of
-        ok ->
-            init2([Ident, Facility, Level, {Formatter, FormatterConfig}]);
-        {error, {already_started, _}} ->
-            init2([Ident, Facility, Level, {Formatter, FormatterConfig}]);
-        Error ->
-            Error
-    end.
-
-%% @private
-init2([Ident, Facility, Level, {Formatter, FormatterConfig}]) ->
-    case syslog:open(Ident, [pid], Facility) of
-        {ok, Log} ->
-            try parse_level(Level) of
-                Lvl ->
-                    {ok, #state{level=Lvl,
-                            id=config_to_id([Ident, Facility, Level]),
-                            handle=Log,
-                            formatter=Formatter,
-                            format_config=FormatterConfig}}
-                catch
-                    _:_ ->
-                        {error, bad_log_level}
-                end;
-        Error ->
-            Error
-    end.
-
+init(Config) ->
+    ok = ensure_running_syslog(Config),
+    {ok, Host} = inet:gethostname(),
+    Level = proplists:get_value(level, Config, info),
+    {ok, #state{server   = proplists:get_value(name, Config, syslog),
+                host     = proplists:get_value(host, Config, Host),
+                ident    = proplists:get_value(ident, Config, node()),
+                facility = proplists:get_value(facility, Config, local0),
+                level    = parse_level(Level)}}.
 
 %% @private
 handle_call(get_loglevel, #state{level=Level} = State) ->
@@ -88,13 +54,24 @@ handle_call(_Request, State) ->
 
 %% @private
 handle_event({log, Level, {_Date, _Time}, [_LevelStr, Location, Message]},
-        #state{level=LogLevel} = State) when Level =< LogLevel ->
-    syslog:log(State#state.handle, convert_level(Level), [Location, Message]),
+             #state{level = LogLevel} = State)
+  when Level =< LogLevel ->
+    syslog:send(State#state.server, [Location, Message],
+                [{host, State#state.host},
+                 {ident, State#state.ident},
+                 {facility, State#state.facility},
+                 {level, convert_level(Level)}]),
     {ok, State};
-handle_event({log, Message}, #state{level=Level,formatter=Formatter,format_config=FormatConfig} = State) ->
+handle_event({log, Message}, #state{level=Level} = State) ->
+    PidList = maybe_pid_to_list(
+                proplists:get_value(pid, lager_msg:metadata(Message))),
     case lager_util:is_loggable(Message, Level, State#state.id) of
         true ->
-            syslog:log(State#state.handle, convert_level(lager_msg:severity_as_int(Message)), [Formatter:format(Message, FormatConfig)]),
+            syslog:send(State#state.server, [PidList, Message],
+                        [{host, State#state.host},
+                         {ident, State#state.ident},
+                         {facility, State#state.facility},
+                         {level, convert_level(Level)}]),
             {ok, State};
         false ->
             {ok, State}
@@ -114,11 +91,19 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%% convert the configuration into a hopefully unique gen_event ID
-config_to_id([Ident, Facility, _Level]) ->
-    {?MODULE, {Ident, Facility}};
-config_to_id([Ident, Facility, _Level, _Formatter]) ->
-    {?MODULE, {Ident, Facility}}.
+ensure_running_syslog(Config) ->
+    Name = proplists:get_value(name, Config, syslog),
+    case whereis(Name) of
+        undefined ->
+            {ok, _Pid} =
+                syslog:start_link(
+                    Name,
+                    proplists:get_value(ip, Config),
+                    proplists:get_value(port, Config)),
+            ok;
+        Pid when is_pid(Pid) ->
+            ok
+    end.
 
 convert_level(?DEBUG) -> debug;
 convert_level(?INFO) -> info;
@@ -127,7 +112,7 @@ convert_level(?WARNING) -> warning;
 convert_level(?ERROR) -> err;
 convert_level(?CRITICAL) -> crit;
 convert_level(?ALERT) -> alert;
-convert_level(?EMERGENCY) -> emerg.
+convert_level(?EMERGENCY) -> emergency.
 
 parse_level(Level) ->
     try lager_util:config_to_mask(Level) of
@@ -139,3 +124,5 @@ parse_level(Level) ->
             lager_util:level_to_num(Level)
     end.
 
+maybe_pid_to_list(undefined) -> "";
+maybe_pid_to_list(Pid) when is_pid(Pid)-> pid_to_list(Pid).
