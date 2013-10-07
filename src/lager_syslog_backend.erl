@@ -67,7 +67,8 @@ handle_event({log, Message}, #state{level=Level} = State) ->
                 proplists:get_value(pid, lager_msg:metadata(Message))),
     case lager_util:is_loggable(Message, Level, State#state.id) of
         true ->
-            syslog:send(State#state.server, [PidList, Message],
+            syslog:send(State#state.server,
+                        [PidList, lager_msg:message(Message)],
                         [{host, State#state.host},
                          {ident, State#state.ident},
                          {facility, State#state.facility},
