@@ -72,7 +72,8 @@ handle_event({log, Message}, #state{level=Level} = State) ->
                         [{host, State#state.host},
                          {ident, State#state.ident},
                          {facility, State#state.facility},
-                         {level, convert_level(Level)}]),
+                         {level, lager_msg:severity(Message)}
+                        ]),
             {ok, State};
         false ->
             {ok, State}
