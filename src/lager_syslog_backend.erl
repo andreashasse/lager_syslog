@@ -127,4 +127,5 @@ parse_level(Level) ->
     end.
 
 maybe_pid_to_list(undefined) -> "";
+maybe_pid_to_list(Pid) when is_list(Pid)-> Pid;
 maybe_pid_to_list(Pid) when is_pid(Pid)-> pid_to_list(Pid).
