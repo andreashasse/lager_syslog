@@ -63,12 +63,10 @@ handle_event({log, Level, {_Date, _Time}, [_LevelStr, Location, Message]},
                  {level, convert_level(Level)}]),
     {ok, State};
 handle_event({log, Message}, #state{level=Level} = State) ->
-    PidList = maybe_pid_to_list(
-                proplists:get_value(pid, lager_msg:metadata(Message))),
     case lager_util:is_loggable(Message, Level, State#state.id) of
         true ->
             syslog:send(State#state.server,
-                        [PidList, lager_msg:message(Message)],
+                        lager_default_formatter:format(Message, []),
                         [{host, State#state.host},
                          {ident, State#state.ident},
                          {facility, State#state.facility},
@@ -125,7 +123,3 @@ parse_level(Level) ->
             %% must be lager < 2.0
             lager_util:level_to_num(Level)
     end.
-
-maybe_pid_to_list(undefined) -> "";
-maybe_pid_to_list(Pid) when is_list(Pid)-> Pid;
-maybe_pid_to_list(Pid) when is_pid(Pid)-> pid_to_list(Pid).
