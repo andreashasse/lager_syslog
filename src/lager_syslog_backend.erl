@@ -23,7 +23,7 @@
 -export([init/1, handle_call/2, handle_event/2, handle_info/2, terminate/2,
         code_change/3]).
 
--record(state, {ident, facility, host, server, level,
+-record(state, {ident, facility, host, server, level, formatter,
                 handle, id}).
 
 -include_lib("lager/include/lager.hrl").
@@ -36,6 +36,8 @@ init(Config) ->
                 host     = proplists:get_value(host, Config, Host),
                 ident    = proplists:get_value(ident, Config, node()),
                 facility = proplists:get_value(facility, Config, local0),
+                formatter = proplists:get_value(formatter, Config,
+                                                lager_default_formatter),
                 level    = parse_level(Level)}}.
 
 %% @private
@@ -62,11 +64,12 @@ handle_event({log, Level, {_Date, _Time}, [_LevelStr, Location, Message]},
                  {facility, State#state.facility},
                  {level, convert_level(Level)}]),
     {ok, State};
-handle_event({log, Message}, #state{level=Level} = State) ->
+handle_event({log, Message},
+             #state{level=Level, formatter = Formatter} = State) ->
     case lager_util:is_loggable(Message, Level, State#state.id) of
         true ->
             syslog:send(State#state.server,
-                        lager_default_formatter:format(Message, []),
+                        Formatter:format(Message, []),
                         [{host, State#state.host},
                          {ident, State#state.ident},
                          {facility, State#state.facility},
